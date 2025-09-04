@@ -1,6 +1,5 @@
-from .common import RateLimit, rate_limit
+from .common import RateLimit
 
 __all__ = [
     'RateLimit',
-    'rate_limit',
 ]

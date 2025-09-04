@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rate-limiter-decorator"
-version = "0.0.1"
+version = "0.0.2"
 description = ""
 authors = ["Вадим Бажов <master@remort.net>"]
 readme = "README.md"
@@ -9,7 +9,8 @@ packages = [{include = "rate_limiter", from = "src"}]
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.4.1"
-
+pytest-cov = "^6.2.1"
+pytest-asyncio = "^1.1.0"
 
 [tool.poetry.group.lint.dependencies]
 mypy = "^1.17.0"

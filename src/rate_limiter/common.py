@@ -1,91 +1,93 @@
 import asyncio
 import logging
-import typing as t
-from collections.abc import Awaitable
+import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Awaitable, Callable, Optional, Tuple, Type
 
 from redis.asyncio import Redis
 
-type TargetFunction[T, **P] = Callable[P, Awaitable[T]]
+log: logging.Logger = logging.getLogger(__name__)
 
-log = logging.getLogger('rate_limiter')
+SLIDING_WINDOW_LUA_SCRIPT = '''
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local window = tonumber(ARGV[2]) * 1000
+local limit = tonumber(ARGV[3])
 
+redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+redis.call('ZADD', key, now, tostring(now))
+local count = redis.call('ZCARD', key)
+redis.call('EXPIRE', key, ARGV[2])
 
-def rate_limit(
-        redis: Redis,
-        limit: int,
-        tries: int,
-        key: str,
-        allowed_exceptions: t.Tuple[t.Type[Exception], ...] = (),
-        interval: int = 1,
-        logger: logging.Logger = log,
-) -> t.Callable[[TargetFunction], TargetFunction]:
-    def wrapper(fn: TargetFunction) -> TargetFunction:
-        async def wrapped(*args: P.args, **kwargs: P.kwargs) -> t.Any:  # type: ignore
-            for try_idx in range(tries):
-                logger.info('Try to run %s for the %s try.', fn.__name__, try_idx + 1)
+if count <= limit then
+    return {count, 1}
+else
+    return {count, 0}
+end
+'''
 
-                if (counter := int(await redis.incr(key))) >= limit - 1:
-                    await redis.decr(key)
-                    log.info('Counter is: %s', counter)
-                    logger.info('Max counter tries (%s) reached. Sleep and wait.', limit)
-                    await asyncio.sleep(interval)
-                    continue
-
-                try:
-                    result = await fn(*args, **kwargs)
-                    logger.info('Got result from the %s try.', try_idx + 1)
-                    return result
-                except allowed_exceptions:
-                    pass
-                finally:
-                    await redis.decr(key)
-
-                logger.info('Sleep %s seconds before retry.', interval)
-                await asyncio.sleep(interval)
-
-            logger.info('All retry attempts failed. Stop trying.')
-
-        return wrapped
-
-    return wrapper
+FnType = Callable[..., Awaitable]
 
 
 @dataclass
 class RateLimit:
     redis: Redis
     limit: int
-    tries: int
-    allowed_exceptions: tuple[type[Exception], ...] = ()
-    interval: int | float = 1
+    window: int
+    retries: int = 3
+    backoff_ms: int = 200
+    backoff_factor: float = 2.0
+    retry_on_exceptions: Tuple[Type[BaseException], ...] = ()
     logger: logging.Logger = log
 
-    def __call__[T, **P](self, fn: TargetFunction[T, P], key: str) -> TargetFunction[T, P]:
-        async def wrapped(*args: P.args, **kwargs: P.kwargs) -> T:  # type: ignore
-            for try_idx in range(self.tries):
-                self.logger.info('Try to run %s for the %s try.', fn.__name__, try_idx + 1)
+    def __post_init__(self) -> None:
+        self._lua_script = self.redis.register_script(SLIDING_WINDOW_LUA_SCRIPT)
 
-                res = await self.redis.incr(key)
-                if (counter := int(res)) >= self.limit - 1:
-                    await self.redis.decr(key)
-                    log.info('Counter is: %s', counter)
-                    self.logger.info('Max counter tries (%s) reached. Sleep and wait.', self.limit)
-                    await asyncio.sleep(self.interval)
-                    continue
+    async def is_execution_allowed(self, key: str) -> bool:
+        now: int = int(time.time() * 1000)
+        count_allowed = await self._lua_script(keys=[key], args=[now, self.window, self.limit])
+        count, allowed = count_allowed
+        return bool(allowed)
 
-                try:
-                    result = await fn(*args, **kwargs)
-                    self.logger.info('Got result from the %s try.', try_idx + 1)
-                    return result
-                except self.allowed_exceptions:
-                    pass
-                finally:
-                    await self.redis.decr(key)
+    def __call__(
+        self, fn: Optional[FnType] = None, *, key: str
+    ) -> Callable[..., Awaitable[Optional[object]]]:
+        def decorator(inner_fn: FnType) -> FnType:
+            async def wrapper(*args, **kwargs) -> Optional[object]:
+                delay: float = self.backoff_ms
+                for attempt in range(1, self.retries + 1):
+                    try:
+                        if await self.is_execution_allowed(key):
+                            return await inner_fn(*args, **kwargs)
+                    except self.retry_on_exceptions as e:
+                        self.logger.warning(
+                            'Exception %s occurred during execution of %s, retrying. Attempt %s/%s.',
+                            e,
+                            key,
+                            attempt,
+                            self.retries,
+                        )
+                    except Exception:
+                        self.logger.exception(
+                            'Unhandled exception in decorated function. Limiter stops.'
+                        )
+                        raise
 
-                self.logger.info('Sleep %s seconds before retry.', self.interval)
-                await asyncio.sleep(self.interval)
+                    self.logger.warning(
+                        'Rate limit hit for %s. Attempt %s/%s. Retrying in %s ms.',
+                        key,
+                        attempt,
+                        self.retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay / 1000)
+                    delay *= self.backoff_factor
 
-            self.logger.error('All retry attempts failed. Stop trying.')
+                self.logger.error(
+                    'All %s attempts exhausted for %s. Giving up.', self.retries, key
+                )
+                return None
 
-        return wrapped
+            return wrapper  # type: ignore
+
+        return decorator(fn) if fn is not None else decorator

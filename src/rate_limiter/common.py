@@ -22,9 +22,11 @@ local count = redis.call('ZCARD', key)
 redis.call('EXPIRE', key, ARGV[2])
 
 if count <= limit then
-    return {count, 1}
+    return {count, 1, 0}
 else
-    return {count, 0}
+    local earliest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')[2]
+    local wait = window - (now - earliest)
+    return {count, 0, wait}
 end
 '''
 
@@ -45,11 +47,14 @@ class RateLimit:
     def __post_init__(self) -> None:
         self._lua_script = self.redis.register_script(SLIDING_WINDOW_LUA_SCRIPT)
 
-    async def is_execution_allowed(self, key: str) -> bool:
+    async def is_execution_allowed(self, key: str) -> Tuple[bool, int]:
         now: int = int(time.time() * 1000)
         count_allowed = await self._lua_script(keys=[key], args=[now, self.window, self.limit])
-        count, allowed = count_allowed
-        return bool(allowed)
+        count, allowed, wait_ms = count_allowed
+        self.logger.info(
+            'Limiter stats. count: %s, allowed: %s, wait ms: %s', count, allowed, wait_ms,
+        )
+        return bool(allowed), int(wait_ms)
 
     def __call__(
         self, fn: Optional[FnType] = None, *, key: str
@@ -59,8 +64,11 @@ class RateLimit:
                 delay: float = self.backoff_ms
                 for attempt in range(1, self.retries + 1):
                     try:
-                        if await self.is_execution_allowed(key):
+                        allowed, wait_ms = await self.is_execution_allowed(key)
+                        if allowed:
                             return await inner_fn(*args, **kwargs)
+                        else:
+                            self.logger.info('Request is rate limited.')
                     except self.retry_on_exceptions as e:
                         self.logger.warning(
                             'Exception %s occurred during execution of %s, retrying. Attempt %s/%s.',
@@ -75,14 +83,15 @@ class RateLimit:
                         )
                         raise
 
+                    sleep_time = max(delay, wait_ms)
                     self.logger.warning(
                         'Rate limit hit for %s. Attempt %s/%s. Retrying in %s ms.',
                         key,
                         attempt,
                         self.retries,
-                        delay,
+                        sleep_time,
                     )
-                    await asyncio.sleep(delay / 1000)
+                    await asyncio.sleep(sleep_time / 1000)
                     delay *= self.backoff_factor
 
                 self.logger.error(

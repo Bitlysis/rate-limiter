@@ -6,6 +6,8 @@ from typing import Awaitable, Callable, Optional, Tuple, Type
 
 from redis.asyncio import Redis
 
+from rate_limiter.exceptions import RetryLimitReached
+
 log: logging.Logger = logging.getLogger(__name__)
 
 SLIDING_WINDOW_LUA_SCRIPT = '''
@@ -33,10 +35,10 @@ FnType = Callable[..., Awaitable]
 class RateLimit:
     redis: Redis
     limit: int
-    window: int
+    window: int = 1
     retries: int = 3
     backoff_ms: int = 200
-    backoff_factor: float = 2.0
+    backoff_factor: float = 1.0
     retry_on_exceptions: Tuple[Type[BaseException], ...] = ()
     logger: logging.Logger = log
 
@@ -86,7 +88,7 @@ class RateLimit:
                 self.logger.error(
                     'All %s attempts exhausted for %s. Giving up.', self.retries, key
                 )
-                return None
+                raise RetryLimitReached('Attempts limit reached.')
 
             return wrapper  # type: ignore
 

@@ -1,8 +1,15 @@
 # Async Rate Limiter (Sliding Window + Lua + Redis)
 
-A Python async rate limiter using Redis and Lua with sliding window algorithm.
+A Python async rate limiter using Redis and Lua with sliding window algorithm.  
 Supports retries, exponential backoff, and optional exception handling.
 
+---
+
+## Installation
+
+```bash
+pip install redis asyncio
+```
 
 ---
 
@@ -14,57 +21,62 @@ Supports retries, exponential backoff, and optional exception handling.
 import asyncio
 import redis.asyncio as aioredis
 from rate_limit_module import RateLimit  # replace with your module
+from rate_limiter.exceptions import RetryLimitReached
 
 redis_client = aioredis.Redis(host='localhost', port=6379, db=0)
 
-rate_limit = RateLimit(redis=redis_client, limit=5, window=10)
+rate_limit = RateLimit(
+    redis=redis_client,
+    limit=5,
+    window=10,
+    retries=3,
+    backoff_ms=200,
+    backoff_factor=2.0,
+    retry_on_exceptions=(ValueError,),
+)
 
-async def main():
-    async def my_task():
-        print("Task executed")
-        return 42
+async def my_task():
+    print('Task executed.')
+    return 42
 
-    wrapped = rate_limit(fn=my_task, key="my_task_key")
+wrapped = rate_limit(fn=my_task, key='task_key')
+
+try:
     result = await wrapped()
     print(result)
-
-asyncio.run(main())
+except RetryLimitReached:
+    print('All retry attempts exhausted.')
 ```
-
----
 
 ### Using as a decorator
 
 ```python
-rate_limit = RateLimit(redis=redis_client, limit=3, window=5)
+rate_limit = RateLimit(
+    redis=redis_client,
+    limit=3,
+    window=5,
+    retries=4,
+    backoff_ms=100,
+    backoff_factor=1.5,
+)
 
-@rate_limit(key="decorated_task")
+@rate_limit(key='decorated_task')
 async def my_decorated_task():
-    print("Decorated task executed")
-    return "done"
+    print('Decorated task executed.')
+    return 'done'
 
-asyncio.run(my_decorated_task())
+try:
+    await my_decorated_task()
+except RetryLimitReached:
+    print('Rate limit retry attempts exhausted.')
 ```
 
 ---
 
-### Handling exceptions with retries
+## Exception behavior
 
-```python
-rate_limit = RateLimit(
-    redis=redis_client,
-    limit=2,
-    window=10,
-    retry_on_exceptions=(ValueError,),
-    backoff_ms=200,
-    backoff_factor=2
-)
-
-@rate_limit(key="task_with_retry")
-async def risky_task():
-    # may raise ValueError
-    ...
-```
+After all retries are used without success, the limiter **raises `RetryLimitReached`** exception  
+instead—making it easier to handle failure explicitly in your code.
 
 ---
 
@@ -72,25 +84,11 @@ async def risky_task():
 
 - Sliding window rate limiting using Redis + Lua
 - Async-friendly
-- Supports retries with exponential backoff
-- Optional exception handling for retries
-- Works as inline wrapper or decorator
+- Retries with exponential backoff configurable
+- Optional exception-based retry logic
+- Raises `RetryLimitReached` when retry attempts are exhausted
+- Supports both inline wrapper and decorator syntax
 
----
-
-## Installation
-
-```bash
-    pip install rate-limiter-decorator
-```
-
----
-
-## Tests
-
-```bash
-    poetry run pytest tests
-```
 ---
 
 ## License

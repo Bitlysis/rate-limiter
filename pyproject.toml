@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rate-limiter-decorator"
-version = "0.0.2"
+version = "0.0.3"
 description = ""
 authors = ["Вадим Бажов <master@remort.net>"]
 readme = "README.md"

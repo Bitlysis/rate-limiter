@@ -1,0 +1,6 @@
+class BaseRetrierError(Exception):
+    ...
+
+
+class RetryLimitReached(BaseRetrierError):
+    ...

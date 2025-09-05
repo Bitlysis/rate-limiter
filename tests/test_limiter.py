@@ -1,7 +1,11 @@
-import pytest
-from unittest.mock import AsyncMock, Mock, patch
-from rate_limiter import RateLimit  # replace with your module
 import logging
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from rate_limiter import RateLimit
+from rate_limiter.exceptions import RetryLimitReached
+
 
 @pytest.mark.asyncio
 async def test_successful_execution():
@@ -72,11 +76,14 @@ async def test_retry_on_exceptions_logged(caplog):
 
     wrapped = rate_limit(fn=my_fn, key='test')
     caplog.set_level(logging.WARNING)
-    with patch("asyncio.sleep", new=AsyncMock()):
+    with (
+        pytest.raises(RetryLimitReached),
+        patch("asyncio.sleep", new=AsyncMock()),
+    ):
         result = await wrapped()
 
-    assert result is None
-    assert any('retrying' in r.message for r in caplog.records)
+        assert result is None
+        assert any('retrying' in r.message for r in caplog.records)
 
 @pytest.mark.asyncio
 async def test_unhandled_exception_stops():

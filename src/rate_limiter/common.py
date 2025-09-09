@@ -1,16 +1,24 @@
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional, Tuple, Type
+from typing import Callable, Optional, Tuple, Type, TypeVar
 
 from redis.asyncio import Redis
+from typing_extensions import ParamSpec
 
 from rate_limiter.exceptions import RetryLimitReached
 
 log: logging.Logger = logging.getLogger(__name__)
 
-SLIDING_WINDOW_LUA_SCRIPT = '''
+P = ParamSpec('P')
+T = TypeVar('T')
+
+type TargetFunction[T, **P] = Callable[P, Awaitable[T]]
+
+
+SLIDING_WINDOW_LUA_SCRIPT = """
 local key = KEYS[1]
 local now = tonumber(ARGV[1])
 local window = tonumber(ARGV[2]) * 1000
@@ -28,14 +36,12 @@ else
     local wait = window - (now - earliest)
     return {count, 0, wait}
 end
-'''
-
-FnType = Callable[..., Awaitable]
+"""
 
 
 @dataclass
 class RateLimit:
-    redis: Redis
+    redis: Redis  # type: ignore
     limit: int
     window: int = 1
     retries: int = 3
@@ -52,15 +58,21 @@ class RateLimit:
         count_allowed = await self._lua_script(keys=[key], args=[now, self.window, self.limit])
         count, allowed, wait_ms = count_allowed
         self.logger.info(
-            'Limiter stats. count: %s, allowed: %s, wait ms: %s', count, allowed, wait_ms,
+            'Limiter stats. count: %s, allowed: %s, wait ms: %s',
+            count,
+            allowed,
+            wait_ms,
         )
         return bool(allowed), int(wait_ms)
 
-    def __call__(
-        self, fn: Optional[FnType] = None, *, key: str
-    ) -> Callable[..., Awaitable[Optional[object]]]:
-        def decorator(inner_fn: FnType) -> FnType:
-            async def wrapper(*args, **kwargs) -> Optional[object]:
+    def __call__[T, **P](
+        self,
+        fn: Optional[TargetFunction[T, P]] = None,
+        *,
+        key: str,
+    ) -> TargetFunction[T, P]:
+        def decorator(inner_fn: TargetFunction[T, P]) -> TargetFunction[T, P]:
+            async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 delay: float = self.backoff_ms
                 for attempt in range(1, self.retries + 1):
                     try:
@@ -71,7 +83,8 @@ class RateLimit:
                             self.logger.info('Request is rate limited.')
                     except self.retry_on_exceptions as e:
                         self.logger.warning(
-                            'Exception %s occurred during execution of %s, retrying. Attempt %s/%s.',
+                            'Exception %s occurred during execution of %s, retrying. ' \
+                            'Attempt %s/%s.',
                             e,
                             key,
                             attempt,
@@ -79,7 +92,7 @@ class RateLimit:
                         )
                     except Exception:
                         self.logger.exception(
-                            'Unhandled exception in decorated function. Limiter stops.'
+                            'Unhandled exception in decorated function. Limiter stops.',
                         )
                         raise
 
@@ -95,10 +108,10 @@ class RateLimit:
                     delay *= self.backoff_factor
 
                 self.logger.error(
-                    'All %s attempts exhausted for %s. Giving up.', self.retries, key
+                    'All %s attempts exhausted for %s. Giving up.', self.retries, key,
                 )
                 raise RetryLimitReached('Attempts limit reached.')
 
-            return wrapper  # type: ignore
+            return wrapper
 
-        return decorator(fn) if fn is not None else decorator
+        return decorator(fn) if fn is not None else decorator  # type: ignore

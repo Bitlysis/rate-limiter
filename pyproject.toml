@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "rate-limiter-decorator"
-version = "0.0.6"
-description = ""
+version = "0.0.7"
+description = "A Python async rate limiter using Redis and Lua with sliding window algorithm. Supports retries, exponential backoff, and optional exception handling."
 authors = ["Вадим Бажов <master@remort.net>"]
 readme = "README.md"
 packages = [{include = "rate_limiter", from = "src"}]

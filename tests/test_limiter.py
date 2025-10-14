@@ -226,3 +226,36 @@ async def test_exponential_backoff_and_wait_ms():
     # sleep should use wait_ms 500 (> backoff_ms 100)
     assert sleep_calls == [0.5]
     assert call_order == ['executed']
+
+
+@pytest.mark.asyncio
+async def test_high_rps_limit_concurrent(redis_mock):
+    """Ensure that RateLimit correctly enforces 30 RPS under concurrent load."""
+    limiter = RateLimit(redis=redis_mock, limit=30, window=1, retries=1)
+
+    async def dummy_task(i: int):
+        await asyncio.sleep(0)
+        return f'ok-{i}'
+
+    limited_task = limiter(dummy_task, key='high_rps:test')
+
+    async def run_task(i: int):
+        try:
+            return await limited_task(i)
+        except RetryLimitReached:
+            return None
+
+    # Launch 31 concurrent tasks
+    tasks = [run_task(i) for i in range(31)]
+    results = await asyncio.gather(*tasks)
+
+    allowed = [r for r in results if r is not None]
+    denied = [r for r in results if r is None]
+
+    # Verify that at most 30 are allowed
+    assert len(allowed) == 30
+    assert len(denied) == 1
+
+    # Ensure all allowed results are unique and sequential
+    assert all(r.startswith('ok-') for r in allowed)
+    assert len(set(allowed)) == len(allowed)

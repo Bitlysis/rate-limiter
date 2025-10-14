@@ -45,7 +45,7 @@ class RateLimit:
     limit: int
     window: int = 1
     retries: int = 3
-    backoff_ms: int = 200
+    backoff_ms: int = 10
     backoff_factor: float = 1.0
     retry_on_exceptions: Tuple[Type[BaseException], ...] = ()
     logger: logging.Logger = log

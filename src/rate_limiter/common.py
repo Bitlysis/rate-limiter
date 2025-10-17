@@ -3,17 +3,13 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TypeVar
+from functools import wraps
 
 from redis.asyncio import Redis
-from typing_extensions import ParamSpec
 
 from rate_limiter.exceptions import RetryLimitReachedError
 
 log: logging.Logger = logging.getLogger(__name__)
-
-P = ParamSpec('P')
-T = TypeVar('T')
 
 type TargetFunction[T, **P] = Callable[P, Awaitable[T]]
 
@@ -72,29 +68,30 @@ class RateLimit:
         key: str,
     ) -> TargetFunction[T, P]:
         def decorator(inner_fn: TargetFunction[T, P]) -> TargetFunction[T, P]:
+            @wraps(inner_fn)
             async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 delay: float = self.backoff_ms
                 for attempt in range(1, self.retries + 1):
-                    try:
-                        allowed, wait_ms = await self.is_execution_allowed(key)
-                        if allowed:
+                    allowed, wait_ms = await self.is_execution_allowed(key)
+                    if allowed:
+                        try:
                             return await inner_fn(*args, **kwargs)
-                        else:
-                            self.logger.info('Request is rate limited.')
-                    except self.retry_on_exceptions as e:
-                        self.logger.warning(
-                            'Exception %s occurred during execution of %s, retrying. ' \
-                            'Attempt %s/%s.',
-                            e,
-                            key,
-                            attempt,
-                            self.retries,
-                        )
-                    except Exception:
-                        self.logger.exception(
-                            'Unhandled exception in decorated function. Limiter stops.',
-                        )
-                        raise
+                        except self.retry_on_exceptions as e:
+                            self.logger.warning(
+                                'Exception %s occurred during execution of %s, retrying. '
+                                'Attempt %s/%s.',
+                                e,
+                                key,
+                                attempt,
+                                self.retries,
+                            )
+                        except Exception:
+                            self.logger.exception(
+                                'Unhandled exception in decorated function. Limiter stops.',
+                            )
+                            raise
+                    else:
+                        self.logger.info('Request is rate limited.')
 
                     sleep_time = max(delay, wait_ms)
                     self.logger.warning(

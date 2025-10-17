@@ -30,6 +30,7 @@ python = "^3.10"
 redis = "^6.4.0"
 
 [tool.ruff]
+fix = true
 exclude = [
     ".git",
     "__pycache__",

@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 
 from rate_limiter.exceptions import RetryLimitReachedError
 
-log: logging.Logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 type TargetFunction[T, **P] = Callable[P, Awaitable[T]]
 
@@ -44,7 +44,6 @@ class RateLimit:
     backoff_ms: int = 10
     backoff_factor: float = 1.0
     retry_on_exceptions: tuple[type[BaseException], ...] = ()
-    logger: logging.Logger = log
 
     def __post_init__(self) -> None:
         self._lua_script = self.redis.register_script(SLIDING_WINDOW_LUA_SCRIPT)
@@ -53,7 +52,7 @@ class RateLimit:
         now: int = int(time.time() * 1000)
         count_allowed = await self._lua_script(keys=[key], args=[now, self.window, self.limit])
         count, allowed, wait_ms = count_allowed
-        self.logger.info(
+        log.info(
             'Limiter stats. count: %s, allowed: %s, wait ms: %s',
             count,
             allowed,
@@ -63,52 +62,49 @@ class RateLimit:
 
     def __call__[T, **P](
         self,
-        fn: TargetFunction[T, P] | None = None,
+        fn: TargetFunction[T, P],
         *,
         key: str,
     ) -> TargetFunction[T, P]:
-        def decorator(inner_fn: TargetFunction[T, P]) -> TargetFunction[T, P]:
-            @wraps(inner_fn)
-            async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-                delay: float = self.backoff_ms
-                for attempt in range(1, self.retries + 1):
-                    allowed, wait_ms = await self.is_execution_allowed(key)
-                    if allowed:
-                        try:
-                            return await inner_fn(*args, **kwargs)
-                        except self.retry_on_exceptions as e:
-                            self.logger.warning(
-                                'Exception %s occurred during execution of %s, retrying. '
-                                'Attempt %s/%s.',
-                                e,
-                                key,
-                                attempt,
-                                self.retries,
-                            )
-                        except Exception:
-                            self.logger.exception(
-                                'Unhandled exception in decorated function. Limiter stops.',
-                            )
-                            raise
-                    else:
-                        self.logger.info('Request is rate limited.')
+        @wraps(fn)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            delay: float = self.backoff_ms
+            for attempt in range(1, self.retries + 1):
+                allowed, wait_ms = await self.is_execution_allowed(key)
+                if allowed:
+                    try:
+                        return await fn(*args, **kwargs)
+                    except self.retry_on_exceptions as e:
+                        log.warning(
+                            'Exception %s occurred during execution of %s, retrying. '
+                            'Attempt %s/%s.',
+                            e,
+                            key,
+                            attempt,
+                            self.retries,
+                        )
+                    except Exception:
+                        log.exception(
+                            'Unhandled exception in decorated function. Limiter stops.',
+                        )
+                        raise
+                else:
+                    log.info('Request is rate limited.')
 
-                    sleep_time = max(delay, wait_ms)
-                    self.logger.warning(
-                        'Rate limit hit for %s. Attempt %s/%s. Retrying in %s ms.',
-                        key,
-                        attempt,
-                        self.retries,
-                        sleep_time,
-                    )
-                    await asyncio.sleep(sleep_time / 1000)
-                    delay *= self.backoff_factor
-
-                self.logger.error(
-                    'All %s attempts exhausted for %s. Giving up.', self.retries, key,
+                sleep_time = max(delay, wait_ms)
+                log.warning(
+                    'Rate limit hit for %s. Attempt %s/%s. Retrying in %s ms.',
+                    key,
+                    attempt,
+                    self.retries,
+                    sleep_time,
                 )
-                raise RetryLimitReachedError('Attempts limit reached.')
+                await asyncio.sleep(sleep_time / 1000)
+                delay *= self.backoff_factor
 
-            return wrapper
+            log.error(
+                'All %s attempts exhausted for %s. Giving up.', self.retries, key,
+            )
+            raise RetryLimitReachedError('Attempts limit reached.')
 
-        return decorator(fn) if fn is not None else decorator  # type: ignore
+        return wrapper

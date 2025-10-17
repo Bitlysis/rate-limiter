@@ -146,44 +146,6 @@ async def test_unhandled_exception_stops():
 
 
 @pytest.mark.asyncio
-async def test_decorator_syntax_usage():
-    """Test using the RateLimit object as a decorator with @ syntax."""
-    redis_mock = Mock()
-    lua_mock = AsyncMock()
-    lua_mock.return_value = [0, 1, 0]
-    redis_mock.register_script.return_value = lua_mock
-
-    rate_limit = RateLimit(
-        redis=redis_mock,
-        limit=1,
-        window=10,
-        retries=2,
-        backoff_ms=50,
-        backoff_factor=1.0,
-    )
-
-    executed = False
-
-    @rate_limit(key='test')
-    async def my_fn():
-        nonlocal executed
-        executed = True
-        return 'ok'
-
-    sleep_mock = AsyncMock()
-    bound = asyncio.sleep
-    asyncio.sleep = sleep_mock
-
-    try:
-        result = await my_fn()
-    finally:
-        asyncio.sleep = bound
-
-    assert executed
-    assert result == 'ok'
-
-
-@pytest.mark.asyncio
 async def test_exponential_backoff_and_wait_ms():
     """Test that backoff uses wait_ms when provided by Lua script."""
     redis_mock = Mock()

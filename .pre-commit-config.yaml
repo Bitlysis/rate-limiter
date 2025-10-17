@@ -1,0 +1,29 @@
+default_language_version:
+    python: python3.13
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: fix-byte-order-marker
+      - id: check-docstring-first
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-ast
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+      - id: end-of-file-fixer
+  - repo: local
+    hooks:
+      - id: lint
+        name: Run linters
+        entry: make lint
+        language: system
+        verbose: true
+        pass_filenames: false
+      - id: tests
+        name: Run tests
+        entry: make test
+        language: system
+        verbose: true
+        pass_filenames: false

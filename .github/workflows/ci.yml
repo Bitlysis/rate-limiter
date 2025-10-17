@@ -1,0 +1,129 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*.*.*
+
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+jobs:
+  quality:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+
+      - uses: snok/install-poetry@v1.4
+        with:
+          version: 1.7.1
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run linter
+        run: poetry run ruff check .
+
+      - name: Run mypy
+        run: poetry run mypy .
+
+      - name: Run tests
+        run: poetry run pytest
+
+  automerge:
+    runs-on: ubuntu-latest
+    needs: quality
+    permissions: write-all
+    if: github.actor == 'dependabot[bot]' || github.actor == 'dependabot-preview[bot]'
+    steps:
+      - name: automerge
+        uses: pascalgn/automerge-action@v0.16.4
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          MERGE_LABELS: ""
+
+  deployment:
+    name: Deploy to private PyPI
+    runs-on: ubuntu-latest
+    needs: quality
+    permissions:
+      deployments: write
+      contents: read
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ap-southeast-1
+          aws-access-key-id: ${{ secrets.CODEARTIFACT_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CODEARTIFACT_AWS_SECRET_ACCESS_KEY }}
+
+      - name: Set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+
+      - uses: snok/install-poetry@v1.4
+        with:
+          version: 1.8.0
+
+      - name: Auth in private PyPI
+        run: |
+          POETRY_HTTP_BASIC_ARTIFACT_PASSWORD=$(aws codeartifact get-authorization-token --domain bitlysis --query authorizationToken --output text --region ap-southeast-1)
+          echo "POETRY_HTTP_BASIC_ARTIFACT_PASSWORD=${POETRY_HTTP_BASIC_ARTIFACT_PASSWORD}" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Get version
+        run: |
+          TAG=${{ github.ref_name }}
+          echo "VERSION=${TAG#v}" >> $GITHUB_ENV
+
+      - name: Set package version ${{ env.VERSION }}
+        run: poetry version ${{ env.VERSION }}
+
+      - name: Build
+        run: poetry build
+
+      - uses: chrnorm/deployment-action@v2
+        name: Create GitHub deployment
+        id: deployment
+        with:
+          token: '${{ github.token }}'
+          environment: lib
+
+      - name: Publish
+        run: poetry publish --repository artifact
+        env:
+          POETRY_HTTP_BASIC_ARTIFACT_USERNAME: aws
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: '${{ github.token }}'
+          state: 'success'
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: '${{ github.token }}'
+          state: 'failure'
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}

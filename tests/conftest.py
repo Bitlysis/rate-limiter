@@ -19,7 +19,9 @@ def redis_mock() -> Any:
     redis._data = {}
 
     async def mock_lua_script(
-        *, keys: list[str], args: list[int],
+        *,
+        keys: list[str],
+        args: list[int],
     ) -> list[int]:
         """
         Emulate Lua sliding-window script.

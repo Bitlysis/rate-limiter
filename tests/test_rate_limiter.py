@@ -4,6 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from redis.asyncio import Redis
 
 from rate_limiter import RateLimit
 
@@ -147,9 +148,12 @@ async def test_exception_propagates_immediately() -> None:
         await wrapped()
 
 
-async def test_high_rps_limit_concurrent(redis_mock: Any) -> None:
+async def test_high_rps_limit_concurrent(
+    redis_mock: Redis,  # type: ignore[type-arg]
+) -> None:
     """Ensure that RateLimit correctly enforces 30 RPS under concurrent load."""
-    limiter = RateLimit(redis=redis_mock, limit=30, window=1)
+    limit = 30
+    limiter = RateLimit(redis=redis_mock, limit=limit, window=1)
 
     async def dummy_task(i: int) -> str:
         await asyncio.sleep(0)
@@ -162,6 +166,6 @@ async def test_high_rps_limit_concurrent(redis_mock: Any) -> None:
     results = await asyncio.gather(*tasks)
 
     # All should succeed (some may wait)
-    assert len(results) == 31
+    assert len(results) == limit + 1
     assert all(r.startswith('ok-') for r in results)
     assert len(set(results)) == len(results)

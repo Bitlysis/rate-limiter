@@ -33,6 +33,7 @@ else
 end
 """
 
+
 @dataclass
 class RateLimit:
     redis: Redis  # type: ignore[type-arg]
@@ -71,4 +72,5 @@ class RateLimit:
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
             await self.wait_until_allowed(key)
             return await fn(*args, **kwargs)
+
         return wrapper

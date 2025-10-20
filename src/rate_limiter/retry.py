@@ -35,8 +35,7 @@ class Retry:
                 except self.retry_on_exceptions as e:
                     last_exception = e
                     log.warning(
-                        'Exception %s occurred during execution of %s, retrying. '
-                        'Attempt %s/%s.',
+                        'Exception %s occurred during execution of %s, retrying. Attempt %s/%s.',
                         e,
                         key,
                         attempt,

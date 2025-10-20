@@ -131,7 +131,7 @@ async def test_independent_usage() -> None:
 
 
 async def test_concurrent_with_transient_failures_and_retry_exhaustion(
-        redis_mock: Redis,  # type: ignore[type-arg]
+    redis_mock: Redis,  # type: ignore[type-arg]
 ) -> None:
     """Test that some tasks fail when retries are exhausted under concurrent load."""
     limit = 30

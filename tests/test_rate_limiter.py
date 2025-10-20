@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -7,8 +6,6 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from rate_limiter import RateLimit
-
-log: logging.Logger = logging.getLogger(__name__)
 
 
 async def test_successful_execution() -> None:

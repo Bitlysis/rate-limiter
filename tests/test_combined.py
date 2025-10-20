@@ -1,4 +1,3 @@
-import logging
 from asyncio import gather
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -8,8 +7,6 @@ from redis.asyncio import Redis
 from rate_limiter import RateLimit
 from rate_limiter.exceptions import RetryLimitReachedError
 from rate_limiter.retry import Retry
-
-log: logging.Logger = logging.getLogger(__name__)
 
 
 async def test_rate_limit_with_retry_on_exception() -> None:

@@ -1,3 +1,4 @@
+import time
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -25,16 +26,16 @@ def redis_mock() -> Any:
 
         Args:
             keys: list with single redis key.
-            args: [now_ms, window_seconds, limit]
+            args: [window_seconds, limit]
 
         Returns:
             [count, allowed_flag (0|1), wait_ms]
         """
         key = keys[0]
-        now = int(args[0])
-        window_seconds = int(args[1])
+        now = int(time.time() * 1000)
+        window_seconds = int(args[0])
         window_ms = window_seconds * 1000
-        limit = int(args[2])
+        limit = int(args[1])
 
         # get or init timestamps list for key
         timestamps = redis._data.setdefault(key, [])

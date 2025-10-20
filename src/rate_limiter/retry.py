@@ -52,9 +52,6 @@ class Retry:
                         )
                         await asyncio.sleep(delay / 1000)
                         delay *= self.backoff_factor
-                except Exception:
-                    log.exception('Unhandled exception in wrapped function.')
-                    raise
 
             log.error('All %s attempts exhausted for %s. Giving up.', self.retries, key)
             raise RetryLimitReachedError('Attempts limit reached.') from last_exception

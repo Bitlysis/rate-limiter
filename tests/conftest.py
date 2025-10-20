@@ -17,7 +17,9 @@ def redis_mock() -> Any:
     # in-memory store: key -> list of timestamps (ms)
     redis._data = {}
 
-    async def mock_lua_script(*, keys=None, args=None):
+    async def mock_lua_script(
+        *, keys: list[str], args: list[int],
+    ) -> list[int]:
         """
         Emulate Lua sliding-window script.
 

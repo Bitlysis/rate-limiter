@@ -35,7 +35,7 @@ end
 
 @dataclass
 class RateLimit:
-    redis: Redis  # type: ignore
+    redis: Redis  # type: ignore[type-arg]
     limit: int
     window: int = 1
 

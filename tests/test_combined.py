@@ -1,9 +1,9 @@
 import logging
 from asyncio import gather
-from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from redis.asyncio import Redis
 
 from rate_limiter import RateLimit
 from rate_limiter.exceptions import RetryLimitReachedError
@@ -133,11 +133,13 @@ async def test_independent_usage() -> None:
     assert result2 == 'retry only'
 
 
-async def test_concurrent_with_transient_failures_and_retry_exhaustion(redis_mock: Any) -> None:
+async def test_concurrent_with_transient_failures_and_retry_exhaustion(
+        redis_mock: Redis,  # type: ignore[type-arg]
+) -> None:
     """Test that some tasks fail when retries are exhausted under concurrent load."""
     limit = 30
     rate_limit = RateLimit(redis=redis_mock, limit=limit, window=1)
-    retry = Retry(retries=1, backoff_ms=50, retry_on_exceptions=(ValueError,))
+    retry = Retry(retries=2, backoff_ms=50, retry_on_exceptions=(ValueError,))
 
     call_counts: dict[int, int] = {}
 
@@ -159,7 +161,7 @@ async def test_concurrent_with_transient_failures_and_retry_exhaustion(redis_moc
             return None
 
     # Launch 31 concurrent tasks
-    tasks = [run_task(i) for i in range(31)]
+    tasks = [run_task(i) for i in range(limit + 1)]
 
     with patch('asyncio.sleep', new=AsyncMock()):
         results = await gather(*tasks)
@@ -176,4 +178,4 @@ async def test_concurrent_with_transient_failures_and_retry_exhaustion(redis_moc
     assert len(set(allowed)) == len(allowed)
 
     # Verify task 30 was attempted twice (initial + 1 retry)
-    assert call_counts[30] == 1
+    assert call_counts[30] == 2
